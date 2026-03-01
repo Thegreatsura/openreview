@@ -8,6 +8,7 @@ import type { Message, Thread } from "chat";
 import { start } from "workflow/api";
 
 import { env } from "@/lib/env";
+import { botWorkflow } from "@/workflow";
 import type { ThreadMessage, WorkflowParams } from "@/workflow";
 
 import { getInstallationOctokit } from "./github";
@@ -73,8 +74,6 @@ const handleMention = async (thread: Thread, message: Message) => {
     repoFullName,
   } satisfies ThreadState);
 
-  const { botWorkflow } = await import("@/workflow");
-
   await start(botWorkflow, [
     {
       baseBranch: pr.base.ref,
@@ -110,8 +109,6 @@ bot.onReaction([emoji.thumbs_up, emoji.heart], async (event) => {
   }
 
   const messages = await collectMessages(event.thread);
-
-  const { botWorkflow } = await import("@/workflow");
 
   await start(botWorkflow, [
     {
