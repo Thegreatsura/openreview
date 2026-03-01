@@ -52,17 +52,6 @@ const startCommand = async (
     repo,
   });
 
-  await octokit.request(
-    "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
-    {
-      body: "On it...",
-      headers: { "X-GitHub-Api-Version": "2022-11-28" },
-      issue_number: prNumber,
-      owner,
-      repo,
-    }
-  );
-
   await start(botWorkflow, [
     {
       baseBranch: pr.base.ref,

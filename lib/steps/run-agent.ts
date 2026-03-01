@@ -1,19 +1,20 @@
 import { anthropic } from "@ai-sdk/anthropic";
 import { Sandbox } from "@vercel/sandbox";
-import { generateText, stepCountIs } from "ai";
+import { ToolLoopAgent, stepCountIs, tool } from "ai";
 import { createBashTool } from "bash-tool";
+import { z } from "zod";
 
 import { parseError } from "@/lib/error";
+import { getInstallationOctokit } from "@/lib/github";
 
 export interface AgentResult {
   errorMessage?: string;
   success: boolean;
-  text: string;
 }
 
-const systemPrompt = `You are an expert software engineering assistant working inside a sandbox with a git repository checked out on a PR branch.
+const instructions = `You are an expert software engineering assistant working inside a sandbox with a git repository checked out on a PR branch.
 
-You have access to bash, readFile, and writeFile tools. Use them to explore the codebase, run commands, and make changes as needed.
+You have access to bash, readFile, and writeFile tools for the sandbox, plus a reply tool to post comments on the pull request.
 
 Based on the user's request, decide what to do. Your capabilities include:
 
@@ -37,30 +38,67 @@ Based on the user's request, decide what to do. Your capabilities include:
 - When asked to fix issues (formatting, lint errors, simple bugs), edit files directly using writeFile
 - After making changes, verify they work by running relevant commands
 
-Always format your response as markdown. Be concise and actionable.`;
+## Replying
+- Use the reply tool to post your response to the pull request
+- Always reply at least once with your findings or actions taken
+- Format replies as markdown
+- Be concise and actionable
+- End every reply with a line break, a horizontal rule, then: *Powered by [OpenReview](https://github.com/haydenbleasel/openreview)*`;
 
-const callAgent = async (
-  sandbox: Sandbox,
-  diff: string,
-  comment: string
-): Promise<string> => {
-  const { tools } = await createBashTool({ sandbox });
+const createReplyTool = (repoFullName: string, prNumber: number) => {
+  const [owner, repo] = repoFullName.split("/");
 
-  const { text } = await generateText({
-    model: anthropic("claude-haiku-4-5"),
-    prompt: `User request: ${comment}\n\nHere is the PR diff:\n\n\`\`\`diff\n${diff}\n\`\`\`\n\nHandle the user's request. Use the tools to explore files, run commands, or make changes as needed.`,
-    stopWhen: stepCountIs(20),
-    system: systemPrompt,
-    tools,
+  return tool({
+    description:
+      "Post a comment on the pull request. Use this to share your findings, ask questions, or report results.",
+    execute: async ({ body }) => {
+      const octokit = await getInstallationOctokit();
+
+      await octokit.request(
+        "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
+        {
+          body,
+          headers: { "X-GitHub-Api-Version": "2022-11-28" },
+          issue_number: prNumber,
+          owner,
+          repo,
+        }
+      );
+
+      return { success: true };
+    },
+    inputSchema: z.object({
+      body: z
+        .string()
+        .describe("The markdown-formatted comment body to post"),
+    }),
   });
+};
 
-  return text;
+const createAgent = async (
+  sandbox: Sandbox,
+  repoFullName: string,
+  prNumber: number
+) => {
+  const { tools: bashTools } = await createBashTool({ sandbox });
+
+  return new ToolLoopAgent({
+    instructions,
+    model: anthropic("claude-haiku-4-5"),
+    stopWhen: stepCountIs(20),
+    tools: {
+      ...bashTools,
+      reply: createReplyTool(repoFullName, prNumber),
+    },
+  });
 };
 
 export const runAgent = async (
   sandboxId: string,
   diff: string,
-  comment: string
+  comment: string,
+  repoFullName: string,
+  prNumber: number
 ): Promise<AgentResult> => {
   "use step";
 
@@ -71,13 +109,17 @@ export const runAgent = async (
   });
 
   try {
-    const text = await callAgent(sandbox, diff, comment);
-    return { success: true, text };
+    const agent = await createAgent(sandbox, repoFullName, prNumber);
+
+    await agent.generate({
+      prompt: `User request: ${comment}\n\nHere is the PR diff:\n\n\`\`\`diff\n${diff}\n\`\`\`\n\nHandle the user's request. Use the tools to explore files, run commands, or make changes as needed. Use the reply tool to post your response.`,
+    });
+
+    return { success: true };
   } catch (error) {
     return {
       errorMessage: parseError(error),
       success: false,
-      text: "",
     };
   }
 };

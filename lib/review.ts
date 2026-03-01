@@ -101,7 +101,13 @@ const runSandboxAgent = async (
   await prepareSandbox(sandboxId, repoFullName, token);
 
   const diff = await getDiff(sandboxId, baseBranch);
-  const agentResult = await runAgent(sandboxId, diff, comment);
+  const agentResult = await runAgent(
+    sandboxId,
+    diff,
+    comment,
+    repoFullName,
+    prNumber
+  );
 
   if (!agentResult.success) {
     throw new FatalError(
@@ -110,15 +116,6 @@ const runSandboxAgent = async (
   }
 
   await pushAgentChanges(sandboxId, prBranch);
-
-  await addPRComment(
-    repoFullName,
-    prNumber,
-    `${agentResult.text}
-
----
-*Powered by [OpenReview](https://github.com/haydenbleasel/openreview)*`
-  );
 };
 
 const executeWorkflow = async (params: WorkflowParams): Promise<void> => {
