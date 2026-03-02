@@ -50,6 +50,7 @@ export const bot = new Chat({
       webhookSecret: env.GITHUB_APP_WEBHOOK_SECRET,
     }),
   },
+  logger: "debug",
   state,
   userName: "openreview",
 });
